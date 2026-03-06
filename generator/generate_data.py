@@ -190,6 +190,57 @@ def _appreciation(moyenne: float) -> str:
     return "Insuffisant"
 
 
+# Observations textuelles associées aux notes individuelles.
+# Environ 60 % des notes auront une observation non nulle.
+_OBSERVATIONS_PAR_TRANCHE: Dict[str, List[str]] = {
+    "excellent": [
+        "Excellent travail, félicitations !",
+        "Très bon résultat, continuez ainsi.",
+        "Remarquable, bravo !",
+        "Très bonne maîtrise du sujet.",
+    ],
+    "bien": [
+        "Bon travail.",
+        "Très satisfaisant.",
+        "Bon résultat.",
+        "Bonne prestation.",
+    ],
+    "assez_bien": [
+        "Travail correct.",
+        "Des progrès notables.",
+        "Bon effort.",
+        "Assez bien, peut encore progresser.",
+    ],
+    "passable": [
+        "Peut mieux faire.",
+        "Travail passable.",
+        "Des efforts encore nécessaires.",
+        "Résultat moyen, à améliorer.",
+    ],
+    "insuffisant": [
+        "Travail insuffisant.",
+        "Des lacunes importantes à combler.",
+        "Doit fournir plus d'efforts.",
+        "Résultat décevant, revoir les bases.",
+    ],
+}
+
+
+def _observation_note(note: float) -> Optional[str]:
+    """Retourne une observation textuelle pour une note (None ~40 % du temps)."""
+    if random.random() > 0.6:
+        return None
+    if note >= 16:
+        return random.choice(_OBSERVATIONS_PAR_TRANCHE["excellent"])
+    if note >= 14:
+        return random.choice(_OBSERVATIONS_PAR_TRANCHE["bien"])
+    if note >= 12:
+        return random.choice(_OBSERVATIONS_PAR_TRANCHE["assez_bien"])
+    if note >= 10:
+        return random.choice(_OBSERVATIONS_PAR_TRANCHE["passable"])
+    return random.choice(_OBSERVATIONS_PAR_TRANCHE["insuffisant"])
+
+
 # ---------------------------------------------------------------------------
 # Classe principale de génération (en mémoire, sans accès à la base)
 # ---------------------------------------------------------------------------
@@ -674,6 +725,13 @@ class SchoolDataGenerator:
                         for eval_num in range(1, NB_EVALUATIONS_PAR_MATIERE_PAR_TRIM + 1):
                             type_ev = "composition" if eval_num == 2 else random.choice(types_eval)
                             date_eval = _random_date_between(t_debut, t_fin)
+                            # Les compositions et examens peuvent s'étendre sur 1 à 3 jours
+                            if type_ev in ("composition", "examen"):
+                                date_fin_eval = date_eval + timedelta(days=random.randint(0, 2))
+                                if date_fin_eval > t_fin:
+                                    date_fin_eval = t_fin
+                            else:
+                                date_fin_eval = None
                             evaluations_rows.append(
                                 {
                                     "titre": f"{matiere['nom']} – {type_ev.capitalize()} T{trimestre_num} n°{eval_num}",
@@ -683,7 +741,7 @@ class SchoolDataGenerator:
                                     "type_evaluation": type_ev,
                                     "trimestre": trimestre_num,
                                     "date_debut": date_eval,
-                                    "date_fin": None,
+                                    "date_fin": date_fin_eval,
                                     "note_max": 20.0,
                                     "coefficient": float(eval_num),
                                 }
@@ -702,7 +760,7 @@ class SchoolDataGenerator:
                                 "evaluation_id": eval_id,
                                 "eleve_id": eleve_id,
                                 "note": note,
-                                "observation": None,
+                                "observation": _observation_note(note),
                                 "date_saisie": date_eval + timedelta(days=random.randint(1, 7)),
                             }
                         )

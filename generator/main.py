@@ -9,14 +9,20 @@ Ce script suit un workflow en 3 étapes :
   3. Connexion à la base PostgreSQL, création du schéma, puis insertion
      des données depuis les fichiers Parquet.
 
+Les étapes 1 et 2 sont automatiquement ignorées si tous les fichiers Parquet
+attendus sont déjà présents dans ``data/``.  Utilisez ``--regen`` ou
+``--reset`` pour forcer une nouvelle génération.
+
 Utilisation
 -----------
-    python main.py [--reset] [--date-debut YYYY-MM-DD] [--date-fin YYYY-MM-DD] [--batch-size N]
+    python main.py [--reset] [--regen] [--date-debut YYYY-MM-DD] [--date-fin YYYY-MM-DD] [--batch-size N]
 
 Options
 -------
-    --reset          : Supprime et recrée le schéma avant de générer les données
-                       (utile pour repartir d'une base vide).
+    --reset          : Supprime et recrée le schéma ET force la régénération
+                       des données (repart d'une base vide).
+    --regen          : Force la régénération des fichiers Parquet sans toucher
+                       au schéma de la base.
     --date-debut     : Surcharge la variable DATE_DEBUT de generate_data.py.
     --date-fin       : Surcharge la variable DATE_FIN de generate_data.py.
     --batch-size     : Taille des lots d'insert SQL (défaut : 1000).
@@ -104,6 +110,11 @@ def apply_schema(reset: bool = False) -> None:
     print("✅  Schéma appliqué avec succès.")
 
 
+def parquet_files_exist(data_dir: Path, tables: list) -> bool:
+    """Retourne True si tous les fichiers Parquet attendus sont présents."""
+    return all((data_dir / f"{table}.parquet").exists() for table in tables)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Génère des données factices pour la base de données scolaire."
@@ -111,7 +122,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reset",
         action="store_true",
-        help="Supprime et recrée le schéma avant la génération.",
+        help="Supprime et recrée le schéma avant la génération (implique --regen).",
+    )
+    parser.add_argument(
+        "--regen",
+        action="store_true",
+        help="Force la régénération des fichiers Parquet même s'ils existent déjà.",
     )
     parser.add_argument(
         "--date-debut",
@@ -140,7 +156,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    from generate_data import DATE_DEBUT, DATE_FIN, SchoolDataGenerator, insert_from_parquet
+    from generate_data import DATE_DEBUT, DATE_FIN, TABLES_ORDER, SchoolDataGenerator, insert_from_parquet
 
     date_debut = args.date_debut or DATE_DEBUT
     date_fin = args.date_fin or DATE_FIN
@@ -148,22 +164,27 @@ def main() -> None:
     if args.batch_size <= 0:
         raise ValueError("--batch-size doit être un entier strictement positif")
 
+    # --reset implique une régénération complète des fichiers Parquet
+    force_regen: bool = args.reset or args.regen
+
     # ------------------------------------------------------------------
-    # Étape 1 – Génération des données en mémoire
+    # Étapes 1 & 2 – Génération + sauvegarde Parquet (avec skip possible)
     # ------------------------------------------------------------------
     print("\n" + "=" * 60)
     print("  Étape 1 : Génération des données en mémoire")
     print("=" * 60)
-    generator = SchoolDataGenerator(date_debut=date_debut, date_fin=date_fin)
-    generator.generate()
 
-    # ------------------------------------------------------------------
-    # Étape 2 – Sauvegarde au format Parquet dans data/
-    # ------------------------------------------------------------------
-    print("\n" + "=" * 60)
-    print(f"  Étape 2 : Sauvegarde Parquet → {DATA_DIR}")
-    print("=" * 60)
-    generator.save_to_parquet(DATA_DIR)
+    if not force_regen and parquet_files_exist(DATA_DIR, TABLES_ORDER):
+        print(f"⏭  Fichiers Parquet déjà présents dans {DATA_DIR}.")
+        print("   Génération ignorée (utilisez --regen ou --reset pour forcer).")
+    else:
+        generator = SchoolDataGenerator(date_debut=date_debut, date_fin=date_fin)
+        generator.generate()
+
+        print("\n" + "=" * 60)
+        print(f"  Étape 2 : Sauvegarde Parquet → {DATA_DIR}")
+        print("=" * 60)
+        generator.save_to_parquet(DATA_DIR)
 
     # ------------------------------------------------------------------
     # Étape 3 – Connexion à la base, création du schéma, insertion
