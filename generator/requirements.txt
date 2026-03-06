@@ -1,0 +1,18 @@
+# Dépendances du projet school-db-analysis
+# Installation : pip install -r requirements.txt
+
+# Base de données PostgreSQL
+psycopg2-binary>=2.9.0
+sqlalchemy>=2.0.0
+
+# Variables d'environnement
+python-dotenv>=1.0.0
+
+# Modèles de données
+pydantic>=2.0.0
+
+# Génération de données factices
+faker>=19.0.0
+
+# Utilitaires
+tqdm>=4.65.0        # Barre de progression lors de l'insertion des données
