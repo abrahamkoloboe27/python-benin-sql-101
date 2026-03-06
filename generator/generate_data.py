@@ -26,6 +26,7 @@ import os
 import random
 import sys
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
@@ -35,7 +36,7 @@ from tqdm import tqdm
 # ---------------------------------------------------------------------------
 # Chargement des variables d'environnement
 # ---------------------------------------------------------------------------
-load_dotenv()
+load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
 
 # ---------------------------------------------------------------------------
 # ██  VARIABLES GLOBALES DE CONFIGURATION  ██
@@ -183,12 +184,18 @@ class SchoolDataGenerator:
         self._psycopg2 = psycopg2
         self._execute_values = execute_values
 
+        sslmode = os.getenv("DB_SSLMODE") or os.getenv("sslmode")
+        connect_kwargs = {}
+        if sslmode:
+            connect_kwargs["sslmode"] = sslmode
+
         self.conn = psycopg2.connect(
             host=os.getenv("DB_HOST", "localhost"),
             port=int(os.getenv("DB_PORT", 5432)),
             dbname=os.getenv("DB_NAME", "school_db"),
             user=os.getenv("DB_USER", "postgres"),
             password=os.getenv("DB_PASSWORD", ""),
+            **connect_kwargs,
         )
         self.conn.autocommit = False
         self.cur = self.conn.cursor()

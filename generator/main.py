@@ -39,12 +39,17 @@ from dotenv import load_dotenv
 # ---------------------------------------------------------------------------
 # Chargement du .env situé dans le même répertoire que main.py
 # ---------------------------------------------------------------------------
-load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
 
 
 def _get_db_connection():
     """Retourne une connexion psycopg2 en utilisant les variables d'env."""
     import psycopg2
+
+    sslmode = os.getenv("DB_SSLMODE") or os.getenv("sslmode")
+    connect_kwargs = {}
+    if sslmode:
+        connect_kwargs["sslmode"] = sslmode
 
     return psycopg2.connect(
         host=os.getenv("DB_HOST", "localhost"),
@@ -52,6 +57,7 @@ def _get_db_connection():
         dbname=os.getenv("DB_NAME", "school_db"),
         user=os.getenv("DB_USER", "postgres"),
         password=os.getenv("DB_PASSWORD", ""),
+        **connect_kwargs,
     )
 
 
