@@ -98,7 +98,7 @@ python main.py
 | Variable                             | Défaut       | Description                                 |
 |--------------------------------------|--------------|---------------------------------------------|
 | `DATE_DEBUT`                         | 2019-09-01   | Première rentrée scolaire                   |
-| `DATE_FIN`                           | 2024-07-31   | Fin de la dernière année scolaire           |
+| `DATE_FIN`                           | 2025-12-31   | Fin de la dernière année scolaire           |
 | `NB_PAYS`                            | 3            | Nombre de pays générés                      |
 | `NB_VILLES_PAR_PAYS`                 | 4            | Villes par pays                             |
 | `NB_ECOLES_PAR_VILLE`                | 2            | Écoles par ville                            |

@@ -9,14 +9,20 @@ Ce script suit un workflow en 3 étapes :
   3. Connexion à la base PostgreSQL, création du schéma, puis insertion
      des données depuis les fichiers Parquet.
 
+Les étapes 1 et 2 sont automatiquement ignorées si tous les fichiers Parquet
+attendus sont déjà présents dans ``data/``.  Utilisez ``--regen`` ou
+``--reset`` pour forcer une nouvelle génération.
+
 Utilisation
 -----------
-    python main.py [--reset] [--date-debut YYYY-MM-DD] [--date-fin YYYY-MM-DD] [--batch-size N]
+    python main.py [--reset] [--regen] [--date-debut YYYY-MM-DD] [--date-fin YYYY-MM-DD] [--batch-size N]
 
 Options
 -------
-    --reset          : Supprime et recrée le schéma avant de générer les données
-                       (utile pour repartir d'une base vide).
+    --reset          : Supprime et recrée le schéma ET force la régénération
+                       des données (repart d'une base vide).
+    --regen          : Force la régénération des fichiers Parquet sans toucher
+                       au schéma de la base.
     --date-debut     : Surcharge la variable DATE_DEBUT de generate_data.py.
     --date-fin       : Surcharge la variable DATE_FIN de generate_data.py.
     --batch-size     : Taille des lots d'insert SQL (défaut : 1000).
@@ -51,13 +57,19 @@ def _get_db_connection():
     """Retourne une connexion psycopg2 en utilisant les variables d'env."""
     import psycopg2
 
-    return psycopg2.connect(
-        host=os.getenv("DB_HOST", "localhost"),
-        port=int(os.getenv("DB_PORT", 5432)),
-        dbname=os.getenv("DB_NAME", "school_db"),
-        user=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASSWORD", ""),
-    )
+    kwargs: dict = {
+        "host": os.getenv("DB_HOST", "localhost"),
+        "port": int(os.getenv("DB_PORT", 5432)),
+        "dbname": os.getenv("DB_NAME", "school_db"),
+        "user": os.getenv("DB_USER", "postgres"),
+        "password": os.getenv("DB_PASSWORD", ""),
+    }
+
+    sslmode = os.getenv("DB_SSLMODE")
+    if sslmode:
+        kwargs["sslmode"] = sslmode
+
+    return psycopg2.connect(**kwargs)
 
 
 def apply_schema(reset: bool = False) -> None:
@@ -66,9 +78,10 @@ def apply_schema(reset: bool = False) -> None:
 
     Paramètres
     ----------
-    reset : si True, les DROP TABLE en tête du fichier recreent le schéma.
-            Si False, le script est exécuté tel quel (idempotent grâce aux
-            IF NOT EXISTS ou à une base vide).
+    reset : si True, supprime toutes les tables existantes avant de les recréer
+            (DROP TABLE … CASCADE).  Si False, utilise IF NOT EXISTS pour ne
+            créer que les tables/index manquants et préserver les données
+            existantes.
     """
     schema_path = Path(__file__).parent / "schema.sql"
     if not schema_path.exists():
@@ -76,6 +89,14 @@ def apply_schema(reset: bool = False) -> None:
         sys.exit(1)
 
     sql = schema_path.read_text(encoding="utf-8")
+
+    if not reset:
+        # Retirer les lignes DROP TABLE pour ne pas écraser les données
+        filtered = [
+            line for line in sql.splitlines()
+            if not line.strip().upper().startswith("DROP TABLE")
+        ]
+        sql = "\n".join(filtered)
 
     conn = _get_db_connection()
     conn.autocommit = True
@@ -89,6 +110,11 @@ def apply_schema(reset: bool = False) -> None:
     print("✅  Schéma appliqué avec succès.")
 
 
+def parquet_files_exist(data_dir: Path, tables: list) -> bool:
+    """Retourne True si tous les fichiers Parquet attendus sont présents."""
+    return all((data_dir / f"{table}.parquet").exists() for table in tables)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Génère des données factices pour la base de données scolaire."
@@ -96,7 +122,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--reset",
         action="store_true",
-        help="Supprime et recrée le schéma avant la génération.",
+        help="Supprime et recrée le schéma avant la génération (implique --regen).",
+    )
+    parser.add_argument(
+        "--regen",
+        action="store_true",
+        help="Force la régénération des fichiers Parquet même s'ils existent déjà.",
     )
     parser.add_argument(
         "--date-debut",
@@ -125,7 +156,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    from generate_data import DATE_DEBUT, DATE_FIN, SchoolDataGenerator, insert_from_parquet
+    from generate_data import DATE_DEBUT, DATE_FIN, TABLES_ORDER, SchoolDataGenerator, insert_from_parquet
 
     date_debut = args.date_debut or DATE_DEBUT
     date_fin = args.date_fin or DATE_FIN
@@ -133,22 +164,27 @@ def main() -> None:
     if args.batch_size <= 0:
         raise ValueError("--batch-size doit être un entier strictement positif")
 
+    # --reset implique une régénération complète des fichiers Parquet
+    force_regen: bool = args.reset or args.regen
+
     # ------------------------------------------------------------------
-    # Étape 1 – Génération des données en mémoire
+    # Étapes 1 & 2 – Génération + sauvegarde Parquet (avec skip possible)
     # ------------------------------------------------------------------
     print("\n" + "=" * 60)
     print("  Étape 1 : Génération des données en mémoire")
     print("=" * 60)
-    generator = SchoolDataGenerator(date_debut=date_debut, date_fin=date_fin)
-    generator.generate()
 
-    # ------------------------------------------------------------------
-    # Étape 2 – Sauvegarde au format Parquet dans data/
-    # ------------------------------------------------------------------
-    print("\n" + "=" * 60)
-    print(f"  Étape 2 : Sauvegarde Parquet → {DATA_DIR}")
-    print("=" * 60)
-    generator.save_to_parquet(DATA_DIR)
+    if not force_regen and parquet_files_exist(DATA_DIR, TABLES_ORDER):
+        print(f"⏭  Fichiers Parquet déjà présents dans {DATA_DIR}.")
+        print("   Génération ignorée (utilisez --regen ou --reset pour forcer).")
+    else:
+        generator = SchoolDataGenerator(date_debut=date_debut, date_fin=date_fin)
+        generator.generate()
+
+        print("\n" + "=" * 60)
+        print(f"  Étape 2 : Sauvegarde Parquet → {DATA_DIR}")
+        print("=" * 60)
+        generator.save_to_parquet(DATA_DIR)
 
     # ------------------------------------------------------------------
     # Étape 3 – Connexion à la base, création du schéma, insertion
