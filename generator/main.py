@@ -3,9 +3,11 @@ main.py
 =======
 Point d'entrée du projet school-db-analysis.
 
-Ce script :
-  1. Initialise la base de données en exécutant schema.sql (CREATE TABLE, vues, index).
-  2. Lance la génération de données factices via SchoolDataGenerator.
+Ce script suit un workflow en 3 étapes :
+  1. Génération des données factices en mémoire (SchoolDataGenerator).
+  2. Sauvegarde des données au format Parquet dans le dossier ``data/``.
+  3. Connexion à la base PostgreSQL, création du schéma, puis insertion
+     des données depuis les fichiers Parquet.
 
 Utilisation
 -----------
@@ -39,17 +41,15 @@ from dotenv import load_dotenv
 # ---------------------------------------------------------------------------
 # Chargement du .env situé dans le même répertoire que main.py
 # ---------------------------------------------------------------------------
-load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+
+# Dossier de sauvegarde des fichiers Parquet
+DATA_DIR: Path = Path(__file__).parent / "data"
 
 
 def _get_db_connection():
     """Retourne une connexion psycopg2 en utilisant les variables d'env."""
     import psycopg2
-
-    sslmode = os.getenv("DB_SSLMODE") or os.getenv("sslmode")
-    connect_kwargs = {}
-    if sslmode:
-        connect_kwargs["sslmode"] = sslmode
 
     return psycopg2.connect(
         host=os.getenv("DB_HOST", "localhost"),
@@ -57,7 +57,6 @@ def _get_db_connection():
         dbname=os.getenv("DB_NAME", "school_db"),
         user=os.getenv("DB_USER", "postgres"),
         password=os.getenv("DB_PASSWORD", ""),
-        **connect_kwargs,
     )
 
 
@@ -126,21 +125,43 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    # Étape 1 – Schéma
-    apply_schema(reset=args.reset)
-
-    # Étape 2 – Génération des données
-    from generate_data import DATE_DEBUT, DATE_FIN, SchoolDataGenerator
+    from generate_data import DATE_DEBUT, DATE_FIN, SchoolDataGenerator, insert_from_parquet
 
     date_debut = args.date_debut or DATE_DEBUT
     date_fin = args.date_fin or DATE_FIN
 
     if args.batch_size <= 0:
         raise ValueError("--batch-size doit être un entier strictement positif")
-    os.environ["DB_BATCH_SIZE"] = str(args.batch_size)
 
+    # ------------------------------------------------------------------
+    # Étape 1 – Génération des données en mémoire
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print("  Étape 1 : Génération des données en mémoire")
+    print("=" * 60)
     generator = SchoolDataGenerator(date_debut=date_debut, date_fin=date_fin)
-    generator.run()
+    generator.generate()
+
+    # ------------------------------------------------------------------
+    # Étape 2 – Sauvegarde au format Parquet dans data/
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print(f"  Étape 2 : Sauvegarde Parquet → {DATA_DIR}")
+    print("=" * 60)
+    generator.save_to_parquet(DATA_DIR)
+
+    # ------------------------------------------------------------------
+    # Étape 3 – Connexion à la base, création du schéma, insertion
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print("  Étape 3 : Connexion DB, schéma et insertion des données")
+    print("=" * 60)
+    apply_schema(reset=args.reset)
+    conn = _get_db_connection()
+    try:
+        insert_from_parquet(DATA_DIR, conn, batch_size=args.batch_size)
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

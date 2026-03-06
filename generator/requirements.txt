@@ -14,5 +14,9 @@ pydantic>=2.0.0
 # Génération de données factices
 faker>=19.0.0
 
+# Sérialisation Parquet (sauvegarde intermédiaire des données générées)
+pandas>=2.0.0
+pyarrow>=12.0.0
+
 # Utilitaires
-tqdm>=4.65.0        # Barre de progression lors de l'insertion des données
+tqdm>=4.65.0        # Barre de progression lors de la génération des données

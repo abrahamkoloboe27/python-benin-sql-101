@@ -1,34 +1,44 @@
 """
 generate_data.py
 ================
-Génère des données factices cohérentes pour la base de données scolaire
-et les insère dans PostgreSQL.
+Génère des données factices cohérentes pour la base de données scolaire,
+les sauvegarde au format Parquet dans le dossier ``data/``, puis fournit
+une fonction pour les insérer dans PostgreSQL.
+
+Workflow recommandé
+-------------------
+    1. Génération en mémoire  → ``SchoolDataGenerator.generate()``
+    2. Sauvegarde Parquet     → ``SchoolDataGenerator.save_to_parquet(data_dir)``
+    3. Insertion en base      → ``insert_from_parquet(data_dir, conn)``
 
 Variables globales de configuration
 ------------------------------------
     DATE_DEBUT : date de début de la période de génération (première rentrée).
     DATE_FIN   : date de fin de la période de génération (dernière fin d'année).
 
-Utilisation
------------
+Utilisation directe (génération + Parquet uniquement, sans DB)
+--------------------------------------------------------------
     python generate_data.py
 
 Prérequis
 ---------
     - Un fichier .env à la racine du projet (voir .env.example).
-    - La base de données et le schéma créés au préalable :
-        psql -U <user> -d <db> -f schema.sql
+    - pip install -r requirements.txt
 """
 
 from __future__ import annotations
 
+import math
 import os
 import random
 import sys
+from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import numpy as np
+import pandas as pd
 from dotenv import load_dotenv
 from faker import Faker
 from tqdm import tqdm
@@ -36,7 +46,7 @@ from tqdm import tqdm
 # ---------------------------------------------------------------------------
 # Chargement des variables d'environnement
 # ---------------------------------------------------------------------------
-load_dotenv(dotenv_path=Path(__file__).parent / ".env", override=True)
+load_dotenv()
 
 # ---------------------------------------------------------------------------
 # ██  VARIABLES GLOBALES DE CONFIGURATION  ██
@@ -104,6 +114,27 @@ MATIERES_DATA: List[Dict[str, Any]] = [
 ]
 
 # ---------------------------------------------------------------------------
+# Ordre d'insertion (dépendances FK)
+# ---------------------------------------------------------------------------
+TABLES_ORDER: List[str] = [
+    "pays",
+    "villes",
+    "annees_scolaires",
+    "niveaux",
+    "matieres",
+    "ecoles",
+    "classes",
+    "enseignants",
+    "enseignements",
+    "eleves",
+    "inscriptions",
+    "evaluations",
+    "notes",
+    "absences",
+    "bulletins",
+]
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -160,48 +191,34 @@ def _appreciation(moyenne: float) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Classe principale de génération
+# Classe principale de génération (en mémoire, sans accès à la base)
 # ---------------------------------------------------------------------------
 
 class SchoolDataGenerator:
     """
-    Génère et insère toutes les données factices dans la base PostgreSQL.
+    Génère toutes les données scolaires factices en mémoire.
+
+    N'interagit pas directement avec la base de données.
+    Utilisez ``generate()`` puis ``save_to_parquet()`` pour produire les
+    fichiers Parquet, et ``insert_from_parquet()`` pour les charger en base.
 
     Paramètres
     ----------
-    date_debut : date de début de la génération (utilisé pour les années scolaires).
-    date_fin   : date de fin de la génération.
+    date_debut : date de début de la période (première rentrée scolaire).
+    date_fin   : date de fin de la période (dernière fin d'année scolaire).
     """
 
     def __init__(self, date_debut: date = DATE_DEBUT, date_fin: date = DATE_FIN) -> None:
         self.date_debut = date_debut
         self.date_fin = date_fin
 
-        # Import ici pour éviter l'import au niveau module si psycopg2 absent
-        import psycopg2
-        from psycopg2.extras import execute_values
+        # Compteurs d'IDs séquentiels par table (simule SERIAL PostgreSQL)
+        self._id_counters: Dict[str, int] = {}
 
-        self._psycopg2 = psycopg2
-        self._execute_values = execute_values
+        # Stockage en mémoire de toutes les lignes par table
+        self._data: Dict[str, List[Dict[str, Any]]] = {t: [] for t in TABLES_ORDER}
 
-        sslmode = os.getenv("DB_SSLMODE") or os.getenv("sslmode")
-        connect_kwargs = {}
-        if sslmode:
-            connect_kwargs["sslmode"] = sslmode
-
-        self.conn = psycopg2.connect(
-            host=os.getenv("DB_HOST", "localhost"),
-            port=int(os.getenv("DB_PORT", 5432)),
-            dbname=os.getenv("DB_NAME", "school_db"),
-            user=os.getenv("DB_USER", "postgres"),
-            password=os.getenv("DB_PASSWORD", ""),
-            **connect_kwargs,
-        )
-        self.conn.autocommit = False
-        self.cur = self.conn.cursor()
-        self.batch_size = int(os.getenv("DB_BATCH_SIZE", "1000"))
-
-        # Mémoire locale des IDs insérés (évite des SELECT répétés)
+        # Mémoire locale des IDs et métadonnées (même interface qu'avant)
         self.pays_ids: List[int] = []
         self.villes: List[Dict[str, Any]] = []         # [{id, pays_id, nom}]
         self.ecoles: List[Dict[str, Any]] = []         # [{id, ville_id, niveau_ecole}]
@@ -216,27 +233,19 @@ class SchoolDataGenerator:
         self.inscriptions_map: Dict[Tuple[int, int], int] = {}
 
     # ------------------------------------------------------------------
-    # Utilitaires SQL
+    # Utilitaires en mémoire (remplacent les helpers SQL)
     # ------------------------------------------------------------------
 
-    def _insert_one(self, table: str, data: Dict[str, Any]) -> int:
-        """Insère une ligne et retourne l'id généré."""
-        cols = list(data.keys())
-        placeholders = [f"%({c})s" for c in cols]
-        sql = (
-            f"INSERT INTO {table} ({', '.join(cols)}) "
-            f"VALUES ({', '.join(placeholders)}) RETURNING id"
-        )
-        self.cur.execute(sql, data)
-        row = self.cur.fetchone()
-        if row is None:
-            raise RuntimeError(f"Aucun id retourné après insertion dans {table}")
-        return row[0]
+    def _next_id(self, table: str) -> int:
+        """Retourne le prochain ID séquentiel pour une table (simule SERIAL)."""
+        self._id_counters[table] = self._id_counters.get(table, 0) + 1
+        return self._id_counters[table]
 
-    def _chunked(self, rows: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
-        if not rows:
-            return []
-        return [rows[i:i + self.batch_size] for i in range(0, len(rows), self.batch_size)]
+    def _insert_one(self, table: str, data: Dict[str, Any]) -> int:
+        """Enregistre une ligne en mémoire et retourne son ID."""
+        row_id = self._next_id(table)
+        self._data[table].append({"id": row_id, **data})
+        return row_id
 
     def _insert_many(
         self,
@@ -244,47 +253,27 @@ class SchoolDataGenerator:
         rows: List[Dict[str, Any]],
         on_conflict_do_nothing: bool = True,
     ) -> None:
-        """Insère plusieurs lignes d'un coup (sans RETURNING)."""
-        if not rows:
-            return
-        cols = list(rows[0].keys())
-        sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES %s"
-        if on_conflict_do_nothing:
-            sql += " ON CONFLICT DO NOTHING"
-
-        for chunk in self._chunked(rows):
-            values = [[r[c] for c in cols] for r in chunk]
-            self._execute_values(self.cur, sql, values)
+        """Enregistre plusieurs lignes en mémoire (paramètre on_conflict ignoré)."""
+        for row in rows:
+            self._insert_one(table, row)
 
     def _insert_many_returning_ids(self, table: str, rows: List[Dict[str, Any]]) -> List[int]:
-        """Insère plusieurs lignes et retourne la liste des IDs générés."""
-        if not rows:
-            return []
-
-        cols = list(rows[0].keys())
-        sql = f"INSERT INTO {table} ({', '.join(cols)}) VALUES %s RETURNING id"
-
-        inserted_ids: List[int] = []
-        for chunk in self._chunked(rows):
-            values = [[r[c] for c in cols] for r in chunk]
-            returned = self._execute_values(self.cur, sql, values, fetch=True)
-            inserted_ids.extend(row[0] for row in returned)
-
-        return inserted_ids
+        """Enregistre plusieurs lignes en mémoire et retourne leurs IDs."""
+        return [self._insert_one(table, row) for row in rows]
 
     # ------------------------------------------------------------------
     # Étape 1 : Référentiels
     # ------------------------------------------------------------------
 
     def generate_pays(self) -> None:
-        print("→ Insertion des pays…")
+        print("→ Génération des pays…")
         data = PAYS_DATA[:NB_PAYS]
         ids = self._insert_many_returning_ids("pays", data)
         for pid in ids:
             self.pays_ids.append(pid)
 
     def generate_villes(self) -> None:
-        print("→ Insertion des villes…")
+        print("→ Génération des villes…")
         villes_fr = [
             "Paris", "Lyon", "Marseille", "Bordeaux", "Toulouse",
             "Nantes", "Strasbourg", "Lille", "Rennes", "Nice",
@@ -314,19 +303,19 @@ class SchoolDataGenerator:
             self.villes.append({"id": vid, "pays_id": pays_id, "nom": nom})
 
     def generate_niveaux(self) -> None:
-        print("→ Insertion des niveaux scolaires…")
+        print("→ Génération des niveaux scolaires…")
         ids = self._insert_many_returning_ids("niveaux", NIVEAUX_DATA)
         for nid, n in zip(ids, NIVEAUX_DATA):
             self.niveaux.append({"id": nid, **n})
 
     def generate_matieres(self) -> None:
-        print("→ Insertion des matières…")
+        print("→ Génération des matières…")
         ids = self._insert_many_returning_ids("matieres", MATIERES_DATA)
         for mid, m in zip(ids, MATIERES_DATA):
             self.matieres.append({"id": mid, **m})
 
     def generate_annees_scolaires(self) -> None:
-        print("→ Insertion des années scolaires…")
+        print("→ Génération des années scolaires…")
         annees_raw = _annees_scolaires_entre(self.date_debut, self.date_fin)
         rows: List[Dict[str, Any]] = []
         for i, (libelle, debut, fin) in enumerate(annees_raw):
@@ -348,7 +337,7 @@ class SchoolDataGenerator:
     # ------------------------------------------------------------------
 
     def generate_ecoles(self) -> None:
-        print("→ Insertion des écoles…")
+        print("→ Génération des écoles…")
         types = ["public", "prive", "communautaire"]
         niveaux_ecole = ["primaire", "college", "lycee"]
         rows: List[Dict[str, Any]] = []
@@ -396,7 +385,7 @@ class SchoolDataGenerator:
         return [m for m in self.matieres if m["cycle"] in (cycle, "tous")]
 
     def generate_classes(self) -> None:
-        print("→ Insertion des classes…")
+        print("→ Génération des classes…")
         sections = ["A", "B", "C"]
         rows: List[Dict[str, Any]] = []
         meta: List[Dict[str, Any]] = []
@@ -437,7 +426,7 @@ class SchoolDataGenerator:
     # ------------------------------------------------------------------
 
     def generate_enseignants(self) -> None:
-        print("→ Insertion des enseignants…")
+        print("→ Génération des enseignants…")
         rows: List[Dict[str, Any]] = []
         meta: List[Tuple[int, str]] = []
         for ecole in self.ecoles:
@@ -466,7 +455,7 @@ class SchoolDataGenerator:
 
     def generate_enseignements(self) -> None:
         """Affecte un enseignant par (classe, matière) de l'école."""
-        print("→ Insertion des enseignements…")
+        print("→ Génération des enseignements…")
         rows: List[Dict[str, Any]] = []
         for classe in self.classes:
             matieres_classe = self._matieres_pour_cycle(classe["cycle"])
@@ -758,62 +747,64 @@ class SchoolDataGenerator:
 
     def generate_bulletins(self) -> None:
         """
-        Calcule et insère les bulletins trimestriels en agrégeant les notes
-        déjà présentes en base.
+        Calcule les bulletins trimestriels en agrégeant les notes en mémoire.
+        Remplace le calcul SQL par un calcul Python pur.
         """
         print("→ Génération des bulletins…")
 
+        # Table de correspondance evaluation_id → infos utiles
+        eval_lookup: Dict[int, Dict[str, Any]] = {
+            row["id"]: row for row in self._data["evaluations"]
+        }
+
+        # Agrégation des notes par (eleve_id, classe_id, annee_scolaire_id, trimestre)
+        note_aggregates: Dict[Tuple, Dict[str, float]] = defaultdict(
+            lambda: {"note_pond": 0.0, "coeff_total": 0.0}
+        )
+        for note_row in self._data["notes"]:
+            ev = eval_lookup.get(note_row["evaluation_id"])
+            if ev is None:
+                continue
+            key = (
+                note_row["eleve_id"],
+                ev["classe_id"],
+                ev["annee_scolaire_id"],
+                ev["trimestre"],
+            )
+            note_aggregates[key]["note_pond"] += note_row["note"] * ev["coefficient"]
+            note_aggregates[key]["coeff_total"] += ev["coefficient"]
+
+        # Regroupement par (classe_id, annee_id, trimestre) pour calculer les rangs
+        class_trimester_grades: Dict[Tuple, List[Tuple[int, Optional[float]]]] = defaultdict(list)
+        for (eleve_id, classe_id, annee_id, trimestre), s in note_aggregates.items():
+            if s["coeff_total"] > 0:
+                moy: Optional[float] = round(
+                    s["note_pond"] / s["coeff_total"], 2
+                )
+                moy = max(0.0, min(20.0, moy))
+            else:
+                moy = None
+            class_trimester_grades[(classe_id, annee_id, trimestre)].append((eleve_id, moy))
+
+        bulletin_rows: List[Dict[str, Any]] = []
         for annee in tqdm(self.annees, desc="  Années (bulletins)"):
-            trimestres_annee = _trimesters(annee["date_debut"])
-            classes_annee = [c for c in self.classes if c["annee_id"] == annee["id"]]
-
-            for classe in classes_annee:
-                eleves_classe = [
-                    eid
-                    for (eid, aid), cid in self.inscriptions_map.items()
-                    if aid == annee["id"] and cid == classe["id"]
-                ]
-                if not eleves_classe:
-                    continue
-
-                for trimestre_num, _, _ in trimestres_annee:
-                    # Récupérer toutes les notes du trimestre pour cette classe
-                    self.cur.execute(
-                        """
-                        SELECT n.eleve_id,
-                               SUM(n.note * ev.coefficient) AS note_pond,
-                               SUM(ev.coefficient)          AS coeff_total
-                        FROM notes n
-                        JOIN evaluations ev ON ev.id = n.evaluation_id
-                        WHERE ev.classe_id          = %s
-                          AND ev.annee_scolaire_id  = %s
-                          AND ev.trimestre          = %s
-                          AND n.eleve_id            = ANY(%s)
-                        GROUP BY n.eleve_id
-                        """,
-                        (classe["id"], annee["id"], trimestre_num, eleves_classe),
+            for classe in [c for c in self.classes if c["annee_id"] == annee["id"]]:
+                for trimestre_num, _, _ in _trimesters(annee["date_debut"]):
+                    eleve_moyennes = class_trimester_grades.get(
+                        (classe["id"], annee["id"], trimestre_num), []
                     )
-                    rows = self.cur.fetchall()
-                    if not rows:
+                    if not eleve_moyennes:
                         continue
 
-                    moyennes = []
-                    for eleve_id, note_pond, coeff_total in rows:
-                        if coeff_total and coeff_total > 0:
-                            moy = round(float(note_pond) / float(coeff_total), 2)
-                            moy = max(0.0, min(20.0, moy))
-                        else:
-                            moy = None
-                        moyennes.append((eleve_id, moy))
+                    # Trier les élèves pour calculer le rang
+                    valides = sorted(
+                        [(eid, m) for eid, m in eleve_moyennes if m is not None],
+                        key=lambda x: x[1],
+                        reverse=True,
+                    )
+                    rang_map = {eid: i + 1 for i, (eid, _) in enumerate(valides)}
 
-                    # Trier pour calculer le rang
-                    moyennes_valides = [(eid, m) for eid, m in moyennes if m is not None]
-                    moyennes_valides.sort(key=lambda x: x[1], reverse=True)
-                    rang_map = {eid: i + 1 for i, (eid, _) in enumerate(moyennes_valides)}
-
-                    bulletin_rows: List[Dict[str, Any]] = []
-                    for eleve_id, moy in moyennes:
-                        rang = rang_map.get(eleve_id)
+                    for eleve_id, moy in eleve_moyennes:
                         bulletin_rows.append(
                             {
                                 "eleve_id": eleve_id,
@@ -821,7 +812,7 @@ class SchoolDataGenerator:
                                 "annee_scolaire_id": annee["id"],
                                 "trimestre": trimestre_num,
                                 "moyenne_generale": moy,
-                                "rang": rang,
+                                "rang": rang_map.get(eleve_id),
                                 "appreciation": _appreciation(moy) if moy is not None else None,
                                 "date_emission": _random_date_between(
                                     date(annee["date_fin"].year, annee["date_fin"].month - 1, 1)
@@ -831,41 +822,167 @@ class SchoolDataGenerator:
                                 ),
                             }
                         )
-                    self._insert_many("bulletins", bulletin_rows)
+
+        self._insert_many("bulletins", bulletin_rows)
 
     # ------------------------------------------------------------------
     # Orchestration principale
     # ------------------------------------------------------------------
 
-    def run(self) -> None:
-        """Exécute toutes les étapes de génération dans l'ordre."""
+    def generate(self) -> None:
+        """Génère toutes les données en mémoire (sans accès à la base)."""
         print(
             f"\n{'='*60}\n"
             f"  Génération des données scolaires\n"
             f"  Période : {self.date_debut} → {self.date_fin}\n"
             f"{'='*60}\n"
         )
-        try:
-            self.generate_pays()
-            self.generate_villes()
-            self.generate_niveaux()
-            self.generate_matieres()
-            self.generate_annees_scolaires()
-            self.generate_ecoles()
-            self.generate_classes()
-            self.generate_enseignants()
-            self.generate_enseignements()
-            self.generate_eleves()
-            self.generate_evaluations_et_notes()
-            self.generate_absences()
-            self.generate_bulletins()
+        self.generate_pays()
+        self.generate_villes()
+        self.generate_niveaux()
+        self.generate_matieres()
+        self.generate_annees_scolaires()
+        self.generate_ecoles()
+        self.generate_classes()
+        self.generate_enseignants()
+        self.generate_enseignements()
+        self.generate_eleves()
+        self.generate_evaluations_et_notes()
+        self.generate_absences()
+        self.generate_bulletins()
+        print("\n✅  Données générées en mémoire avec succès !")
 
-            self.conn.commit()
-            print("\n✅  Données générées et commitées avec succès !")
-        except Exception as exc:
-            self.conn.rollback()
-            print(f"\n❌  Erreur : {exc}", file=sys.stderr)
-            raise
-        finally:
-            self.cur.close()
-            self.conn.close()
+    def save_to_parquet(self, data_dir: Path) -> None:
+        """
+        Sauvegarde toutes les tables générées au format Parquet.
+
+        Paramètres
+        ----------
+        data_dir : chemin du dossier de destination (créé s'il n'existe pas).
+        """
+        data_dir = Path(data_dir)
+        data_dir.mkdir(parents=True, exist_ok=True)
+        print(f"\n→ Sauvegarde Parquet dans {data_dir} …")
+        for table in TABLES_ORDER:
+            rows = self._data.get(table, [])
+            if not rows:
+                print(f"  ⚠  {table!r} vide, fichier ignoré.")
+                continue
+            df = pd.DataFrame(rows)
+            parquet_path = data_dir / f"{table}.parquet"
+            df.to_parquet(parquet_path, index=False)
+            print(f"  ✓ {table}.parquet  ({len(df):,} lignes)")
+        print("✅  Sauvegarde Parquet terminée.")
+
+    def to_dataframes(self) -> Dict[str, "pd.DataFrame"]:
+        """Retourne toutes les tables générées comme DataFrames pandas."""
+        return {table: pd.DataFrame(rows) for table, rows in self._data.items()}
+
+
+# ---------------------------------------------------------------------------
+# Helpers de conversion de types pour psycopg2
+# ---------------------------------------------------------------------------
+
+def _to_python(v: Any) -> Any:
+    """Convertit un scalaire pandas/numpy en type Python natif pour psycopg2."""
+    if v is None:
+        return None
+    if v is pd.NaT:
+        return None
+    try:
+        if pd.isna(v):
+            return None
+    except (TypeError, ValueError):
+        pass
+    if isinstance(v, pd.Timestamp):
+        return v.date()
+    if isinstance(v, np.integer):
+        return int(v)
+    if isinstance(v, np.floating):
+        return None if math.isnan(v) else float(v)
+    if isinstance(v, np.bool_):
+        return bool(v)
+    return v
+
+
+# ---------------------------------------------------------------------------
+# Insertion depuis les fichiers Parquet vers PostgreSQL
+# ---------------------------------------------------------------------------
+
+def insert_from_parquet(data_dir: Path, conn: Any, batch_size: int = 1000) -> None:
+    """
+    Charge les fichiers Parquet depuis ``data_dir`` et les insère dans
+    PostgreSQL en respectant l'ordre des dépendances FK.
+
+    Paramètres
+    ----------
+    data_dir   : dossier contenant les fichiers ``<table>.parquet``.
+    conn       : connexion psycopg2 active (autocommit désactivé).
+    batch_size : nombre de lignes insérées par lot.
+    """
+    from psycopg2.extras import execute_values
+
+    data_dir = Path(data_dir)
+    print(f"\n→ Insertion en base depuis {data_dir} …")
+    conn.autocommit = False
+    cur = conn.cursor()
+
+    try:
+        for table in TABLES_ORDER:
+            parquet_path = data_dir / f"{table}.parquet"
+            if not parquet_path.exists():
+                print(f"  ⚠  {table}.parquet introuvable, sauté.")
+                continue
+
+            df = pd.read_parquet(parquet_path)
+            if df.empty:
+                print(f"  ⚠  {table}.parquet vide, sauté.")
+                continue
+
+            # Validation explicite : table ne peut être qu'une valeur connue de TABLES_ORDER
+            if table not in TABLES_ORDER:
+                raise ValueError(f"Nom de table non autorisé : {table!r}")
+
+            cols = list(df.columns)
+            # Convertir chaque ligne en liste de valeurs Python-natives
+            rows_for_insert = [
+                [_to_python(v) for v in row]
+                for row in df.itertuples(index=False, name=None)
+            ]
+
+            sql = (
+                f"INSERT INTO {table} ({', '.join(cols)}) VALUES %s"
+                " ON CONFLICT DO NOTHING"
+            )
+            for i in range(0, len(rows_for_insert), batch_size):
+                chunk = rows_for_insert[i : i + batch_size]
+                execute_values(cur, sql, chunk)
+
+            # Réinitialiser la séquence PostgreSQL après insertion avec IDs explicites
+            cur.execute(
+                f"SELECT setval("
+                f"  pg_get_serial_sequence('{table}', 'id'),"
+                f"  COALESCE(MAX(id), 1)"
+                f") FROM {table}"
+            )
+            print(f"  ✓ {table}  ({len(df):,} lignes insérées)")
+
+        conn.commit()
+        print("✅  Insertion en base terminée avec succès !")
+    except Exception as exc:
+        conn.rollback()
+        print(f"\n❌  Erreur lors de l'insertion : {exc}", file=sys.stderr)
+        raise
+    finally:
+        cur.close()
+
+
+# ---------------------------------------------------------------------------
+# Point d'entrée direct (génération + Parquet uniquement, sans DB)
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    _data_dir = Path(__file__).parent / "data"
+    _generator = SchoolDataGenerator()
+    _generator.generate()
+    _generator.save_to_parquet(_data_dir)
