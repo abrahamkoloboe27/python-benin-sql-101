@@ -51,13 +51,19 @@ def _get_db_connection():
     """Retourne une connexion psycopg2 en utilisant les variables d'env."""
     import psycopg2
 
-    return psycopg2.connect(
-        host=os.getenv("DB_HOST", "localhost"),
-        port=int(os.getenv("DB_PORT", 5432)),
-        dbname=os.getenv("DB_NAME", "school_db"),
-        user=os.getenv("DB_USER", "postgres"),
-        password=os.getenv("DB_PASSWORD", ""),
-    )
+    kwargs: dict = {
+        "host": os.getenv("DB_HOST", "localhost"),
+        "port": int(os.getenv("DB_PORT", 5432)),
+        "dbname": os.getenv("DB_NAME", "school_db"),
+        "user": os.getenv("DB_USER", "postgres"),
+        "password": os.getenv("DB_PASSWORD", ""),
+    }
+
+    sslmode = os.getenv("DB_SSLMODE")
+    if sslmode:
+        kwargs["sslmode"] = sslmode
+
+    return psycopg2.connect(**kwargs)
 
 
 def apply_schema(reset: bool = False) -> None:
@@ -66,9 +72,10 @@ def apply_schema(reset: bool = False) -> None:
 
     Paramètres
     ----------
-    reset : si True, les DROP TABLE en tête du fichier recreent le schéma.
-            Si False, le script est exécuté tel quel (idempotent grâce aux
-            IF NOT EXISTS ou à une base vide).
+    reset : si True, supprime toutes les tables existantes avant de les recréer
+            (DROP TABLE … CASCADE).  Si False, utilise IF NOT EXISTS pour ne
+            créer que les tables/index manquants et préserver les données
+            existantes.
     """
     schema_path = Path(__file__).parent / "schema.sql"
     if not schema_path.exists():
@@ -76,6 +83,14 @@ def apply_schema(reset: bool = False) -> None:
         sys.exit(1)
 
     sql = schema_path.read_text(encoding="utf-8")
+
+    if not reset:
+        # Retirer les lignes DROP TABLE pour ne pas écraser les données
+        filtered = [
+            line for line in sql.splitlines()
+            if not line.strip().upper().startswith("DROP TABLE")
+        ]
+        sql = "\n".join(filtered)
 
     conn = _get_db_connection()
     conn.autocommit = True

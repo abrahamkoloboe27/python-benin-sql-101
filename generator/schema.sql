@@ -26,7 +26,7 @@ DROP TABLE IF EXISTS pays CASCADE;
 -- =============================================================================
 -- TABLE : pays
 -- =============================================================================
-CREATE TABLE pays (
+CREATE TABLE IF NOT EXISTS pays (
     id          SERIAL PRIMARY KEY,
     nom         VARCHAR(100) NOT NULL UNIQUE,
     code_iso    CHAR(2)      NOT NULL UNIQUE,   -- Code ISO 3166-1 alpha-2
@@ -40,7 +40,7 @@ COMMENT ON COLUMN pays.code_iso IS 'Code ISO 3166-1 alpha-2 (ex: FR, BJ, SN).';
 -- =============================================================================
 -- TABLE : villes
 -- =============================================================================
-CREATE TABLE villes (
+CREATE TABLE IF NOT EXISTS villes (
     id          SERIAL PRIMARY KEY,
     nom         VARCHAR(100) NOT NULL,
     pays_id     INT          NOT NULL REFERENCES pays(id) ON DELETE RESTRICT,
@@ -54,7 +54,7 @@ COMMENT ON TABLE villes IS 'Villes rattachées à un pays.';
 -- =============================================================================
 -- TABLE : ecoles
 -- =============================================================================
-CREATE TABLE ecoles (
+CREATE TABLE IF NOT EXISTS ecoles (
     id              SERIAL PRIMARY KEY,
     nom             VARCHAR(150) NOT NULL,
     adresse         VARCHAR(255),
@@ -76,7 +76,7 @@ COMMENT ON COLUMN ecoles.niveau_ecole IS 'Niveau d''enseignement principal.';
 -- =============================================================================
 -- TABLE : annees_scolaires
 -- =============================================================================
-CREATE TABLE annees_scolaires (
+CREATE TABLE IF NOT EXISTS annees_scolaires (
     id          SERIAL PRIMARY KEY,
     libelle     VARCHAR(20)  NOT NULL UNIQUE,   -- Ex: "2022-2023"
     date_debut  DATE         NOT NULL,
@@ -91,7 +91,7 @@ COMMENT ON TABLE annees_scolaires IS 'Années scolaires (ex: 2022-2023).';
 -- =============================================================================
 -- TABLE : niveaux
 -- =============================================================================
-CREATE TABLE niveaux (
+CREATE TABLE IF NOT EXISTS niveaux (
     id          SERIAL PRIMARY KEY,
     nom         VARCHAR(50)  NOT NULL UNIQUE,   -- Ex: "6ème", "5ème", "CP", "CM2"
     ordre       INT          NOT NULL UNIQUE,   -- Ordre croissant dans le cursus
@@ -106,7 +106,7 @@ COMMENT ON COLUMN niveaux.ordre IS 'Rang dans le parcours scolaire (1 = premièr
 -- =============================================================================
 -- TABLE : classes
 -- =============================================================================
-CREATE TABLE classes (
+CREATE TABLE IF NOT EXISTS classes (
     id                  SERIAL PRIMARY KEY,
     nom                 VARCHAR(50)  NOT NULL,   -- Ex: "6ème A", "CM2 B"
     ecole_id            INT          NOT NULL REFERENCES ecoles(id) ON DELETE CASCADE,
@@ -123,7 +123,7 @@ COMMENT ON TABLE classes IS 'Classes par école, niveau et année scolaire.';
 -- =============================================================================
 -- TABLE : matieres
 -- =============================================================================
-CREATE TABLE matieres (
+CREATE TABLE IF NOT EXISTS matieres (
     id          SERIAL PRIMARY KEY,
     nom         VARCHAR(100) NOT NULL UNIQUE,
     code        VARCHAR(10)  NOT NULL UNIQUE,   -- Ex: "MATH", "FR", "HG"
@@ -139,7 +139,7 @@ COMMENT ON COLUMN matieres.coefficient IS 'Coefficient de la matière dans le ca
 -- =============================================================================
 -- TABLE : enseignants
 -- =============================================================================
-CREATE TABLE enseignants (
+CREATE TABLE IF NOT EXISTS enseignants (
     id              SERIAL PRIMARY KEY,
     nom             VARCHAR(100) NOT NULL,
     prenom          VARCHAR(100) NOT NULL,
@@ -158,7 +158,7 @@ COMMENT ON TABLE enseignants IS 'Corps enseignant.';
 -- =============================================================================
 -- TABLE : enseignements  (affectation enseignant → classe × matière)
 -- =============================================================================
-CREATE TABLE enseignements (
+CREATE TABLE IF NOT EXISTS enseignements (
     id                  SERIAL PRIMARY KEY,
     enseignant_id       INT NOT NULL REFERENCES enseignants(id) ON DELETE CASCADE,
     classe_id           INT NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
@@ -173,7 +173,7 @@ COMMENT ON TABLE enseignements IS 'Affectation des enseignants aux classes et ma
 -- =============================================================================
 -- TABLE : eleves
 -- =============================================================================
-CREATE TABLE eleves (
+CREATE TABLE IF NOT EXISTS eleves (
     id                  SERIAL PRIMARY KEY,
     nom                 VARCHAR(100) NOT NULL,
     prenom              VARCHAR(100) NOT NULL,
@@ -195,7 +195,7 @@ COMMENT ON TABLE eleves IS 'Élèves inscrits dans le système.';
 -- TABLE : inscriptions  (élève → classe par année scolaire)
 -- Permet de suivre le passage d'un élève d'une classe à l'autre.
 -- =============================================================================
-CREATE TABLE inscriptions (
+CREATE TABLE IF NOT EXISTS inscriptions (
     id                  SERIAL PRIMARY KEY,
     eleve_id            INT          NOT NULL REFERENCES eleves(id) ON DELETE CASCADE,
     classe_id           INT          NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
@@ -214,7 +214,7 @@ COMMENT ON COLUMN inscriptions.statut IS 'actif, transféré, abandonné, diplô
 -- =============================================================================
 -- TABLE : evaluations  (compositions / devoirs / examens)
 -- =============================================================================
-CREATE TABLE evaluations (
+CREATE TABLE IF NOT EXISTS evaluations (
     id                  SERIAL PRIMARY KEY,
     titre               VARCHAR(200) NOT NULL,
     matiere_id          INT          NOT NULL REFERENCES matieres(id) ON DELETE RESTRICT,
@@ -237,7 +237,7 @@ COMMENT ON COLUMN evaluations.trimestre IS 'Trimestre de l''évaluation (1, 2 ou
 -- =============================================================================
 -- TABLE : notes
 -- =============================================================================
-CREATE TABLE notes (
+CREATE TABLE IF NOT EXISTS notes (
     id              SERIAL PRIMARY KEY,
     evaluation_id   INT          NOT NULL REFERENCES evaluations(id) ON DELETE CASCADE,
     eleve_id        INT          NOT NULL REFERENCES eleves(id) ON DELETE CASCADE,
@@ -256,7 +256,7 @@ COMMENT ON TABLE notes IS 'Notes obtenues par les élèves aux évaluations.';
 -- =============================================================================
 -- TABLE : absences
 -- =============================================================================
-CREATE TABLE absences (
+CREATE TABLE IF NOT EXISTS absences (
     id              SERIAL PRIMARY KEY,
     eleve_id        INT          NOT NULL REFERENCES eleves(id) ON DELETE CASCADE,
     classe_id       INT          NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
@@ -273,7 +273,7 @@ COMMENT ON TABLE absences IS 'Absences des élèves.';
 -- =============================================================================
 -- TABLE : bulletins  (relevés de notes trimestriels)
 -- =============================================================================
-CREATE TABLE bulletins (
+CREATE TABLE IF NOT EXISTS bulletins (
     id                  SERIAL PRIMARY KEY,
     eleve_id            INT          NOT NULL REFERENCES eleves(id) ON DELETE CASCADE,
     classe_id           INT          NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
@@ -293,17 +293,17 @@ COMMENT ON COLUMN bulletins.moyenne_generale IS 'Moyenne générale pondérée p
 -- =============================================================================
 -- INDEX pour optimiser les requêtes fréquentes
 -- =============================================================================
-CREATE INDEX idx_inscriptions_eleve   ON inscriptions(eleve_id);
-CREATE INDEX idx_inscriptions_classe  ON inscriptions(classe_id);
-CREATE INDEX idx_inscriptions_annee   ON inscriptions(annee_scolaire_id);
-CREATE INDEX idx_notes_evaluation     ON notes(evaluation_id);
-CREATE INDEX idx_notes_eleve          ON notes(eleve_id);
-CREATE INDEX idx_evaluations_classe   ON evaluations(classe_id);
-CREATE INDEX idx_evaluations_annee    ON evaluations(annee_scolaire_id);
-CREATE INDEX idx_bulletins_eleve      ON bulletins(eleve_id);
-CREATE INDEX idx_absences_eleve       ON absences(eleve_id);
-CREATE INDEX idx_classes_ecole        ON classes(ecole_id);
-CREATE INDEX idx_classes_annee        ON classes(annee_scolaire_id);
+CREATE INDEX IF NOT EXISTS idx_inscriptions_eleve   ON inscriptions(eleve_id);
+CREATE INDEX IF NOT EXISTS idx_inscriptions_classe  ON inscriptions(classe_id);
+CREATE INDEX IF NOT EXISTS idx_inscriptions_annee   ON inscriptions(annee_scolaire_id);
+CREATE INDEX IF NOT EXISTS idx_notes_evaluation     ON notes(evaluation_id);
+CREATE INDEX IF NOT EXISTS idx_notes_eleve          ON notes(eleve_id);
+CREATE INDEX IF NOT EXISTS idx_evaluations_classe   ON evaluations(classe_id);
+CREATE INDEX IF NOT EXISTS idx_evaluations_annee    ON evaluations(annee_scolaire_id);
+CREATE INDEX IF NOT EXISTS idx_bulletins_eleve      ON bulletins(eleve_id);
+CREATE INDEX IF NOT EXISTS idx_absences_eleve       ON absences(eleve_id);
+CREATE INDEX IF NOT EXISTS idx_classes_ecole        ON classes(ecole_id);
+CREATE INDEX IF NOT EXISTS idx_classes_annee        ON classes(annee_scolaire_id);
 
 -- =============================================================================
 -- VUE : moyenne par élève, matière et année scolaire
