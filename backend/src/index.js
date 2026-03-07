@@ -11,15 +11,9 @@ if (!process.env.JWT_SECRET) {
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
-const ALLOWED_ORIGINS = FRONTEND_URL.split(',').map(u => u.trim()).filter(Boolean);
 
 // ── Middleware ───────────────────────────────────────────────────────────────
-app.use(cors({
-  origin: ALLOWED_ORIGINS,
-  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+app.use(cors());
 
 app.use(express.json({ limit: '64kb' }));
 
@@ -59,5 +53,5 @@ app.use((err, _req, res, _next) => {
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`🚀  Backend SQL 101 — http://localhost:${PORT}`);
-  console.log(`    CORS autorisé pour : ${ALLOWED_ORIGINS.join(', ')}`);
+  console.log(`    CORS : toutes les origines autorisées`);
 });
