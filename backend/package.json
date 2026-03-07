@@ -1,0 +1,20 @@
+{
+  "name": "python-benin-sql-101-backend",
+  "version": "1.0.0",
+  "description": "Backend API for Python Bénin SQL 101 – auth & query history",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^11.9.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^4.21.2",
+    "express-rate-limit": "^8.3.0",
+    "jsonwebtoken": "^9.0.2"
+  }
+}
