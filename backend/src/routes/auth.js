@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const db = require('../db');
+const { pool } = require('../db');
 const requireAuth = require('../middleware/auth');
 
 const router = express.Router();
@@ -30,14 +30,15 @@ router.post('/register', async (req, res) => {
 
   try {
     const hash = await bcrypt.hash(password, 10);
-    const result = db
-      .prepare('INSERT INTO users (username, password_hash) VALUES (?, ?)')
-      .run(username.trim(), hash);
+    const result = await pool.query(
+      'INSERT INTO users (username, password_hash) VALUES ($1, $2) RETURNING id, username',
+      [username.trim(), hash]
+    );
 
-    const user = { id: result.lastInsertRowid, username: username.trim() };
+    const user = result.rows[0];
     res.status(201).json({ user, token: generateToken(user) });
   } catch (e) {
-    if (e.message.includes('UNIQUE')) {
+    if (e.code === '23505') {
       return res.status(409).json({ error: "Ce nom d'utilisateur est déjà pris" });
     }
     console.error('register error:', e);
@@ -53,31 +54,44 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: "Nom d'utilisateur et mot de passe requis" });
   }
 
-  const row = db
-    .prepare('SELECT id, username, password_hash, created_at FROM users WHERE username = ?')
-    .get(username.trim());
+  try {
+    const result = await pool.query(
+      'SELECT id, username, password_hash, created_at FROM users WHERE LOWER(username) = LOWER($1)',
+      [username.trim()]
+    );
 
-  if (!row) {
-    return res.status(401).json({ error: "Nom d'utilisateur ou mot de passe incorrect" });
+    const row = result.rows[0];
+    if (!row) {
+      return res.status(401).json({ error: "Nom d'utilisateur ou mot de passe incorrect" });
+    }
+
+    const ok = await bcrypt.compare(password, row.password_hash);
+    if (!ok) {
+      return res.status(401).json({ error: "Nom d'utilisateur ou mot de passe incorrect" });
+    }
+
+    const { password_hash, ...user } = row;
+    res.json({ user, token: generateToken(user) });
+  } catch (e) {
+    console.error('login error:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
-
-  const ok = await bcrypt.compare(password, row.password_hash);
-  if (!ok) {
-    return res.status(401).json({ error: "Nom d'utilisateur ou mot de passe incorrect" });
-  }
-
-  const { password_hash, ...user } = row;
-  res.json({ user, token: generateToken(user) });
 });
 
 // ── GET /api/auth/me ─────────────────────────────────────────────────────────
-router.get('/me', requireAuth, (req, res) => {
-  const user = db
-    .prepare('SELECT id, username, created_at FROM users WHERE id = ?')
-    .get(req.user.id);
+router.get('/me', requireAuth, async (req, res) => {
+  try {
+    const result = await pool.query(
+      'SELECT id, username, created_at FROM users WHERE id = $1',
+      [req.user.id]
+    );
 
-  if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
-  res.json({ user });
+    if (!result.rows[0]) return res.status(404).json({ error: 'Utilisateur introuvable' });
+    res.json({ user: result.rows[0] });
+  } catch (e) {
+    console.error('me error:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
 module.exports = router;

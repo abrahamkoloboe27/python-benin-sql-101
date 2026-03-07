@@ -1,60 +1,79 @@
 const express = require('express');
-const db = require('../db');
+const { pool } = require('../db');
 const requireAuth = require('../middleware/auth');
 
 const router = express.Router();
 router.use(requireAuth);
 
 // ── GET /api/history ─────────────────────────────────────────────────────────
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
-  const rows = db
-    .prepare(
+  try {
+    const result = await pool.query(
       `SELECT id, query, executed_at, rows_returned, has_error
        FROM query_history
-       WHERE user_id = ?
+       WHERE user_id = $1
        ORDER BY executed_at DESC
-       LIMIT ?`
-    )
-    .all(req.user.id, limit);
-  res.json({ history: rows });
+       LIMIT $2`,
+      [req.user.id, limit]
+    );
+    res.json({ history: result.rows });
+  } catch (e) {
+    console.error('history get error:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
 // ── POST /api/history ────────────────────────────────────────────────────────
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const { query, rows_returned, has_error } = req.body ?? {};
   if (!query?.trim()) {
     return res.status(400).json({ error: 'Requête vide' });
   }
-  const result = db
-    .prepare(
+  try {
+    const result = await pool.query(
       `INSERT INTO query_history (user_id, query, rows_returned, has_error)
-       VALUES (?, ?, ?, ?)`
-    )
-    .run(req.user.id, query.trim(), rows_returned ?? 0, has_error ? 1 : 0);
-
-  res.status(201).json({ id: result.lastInsertRowid });
+       VALUES ($1, $2, $3, $4)
+       RETURNING id`,
+      [req.user.id, query.trim(), rows_returned ?? 0, has_error ? true : false]
+    );
+    res.status(201).json({ id: result.rows[0].id });
+  } catch (e) {
+    console.error('history post error:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
 // ── DELETE /api/history  (clear all for user) ────────────────────────────────
-router.delete('/', (req, res) => {
-  db.prepare('DELETE FROM query_history WHERE user_id = ?').run(req.user.id);
-  res.json({ ok: true });
+router.delete('/', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM query_history WHERE user_id = $1', [req.user.id]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('history delete error:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
 // ── DELETE /api/history/:id  (single entry) ──────────────────────────────────
-router.delete('/:id', (req, res) => {
+router.delete('/:id', async (req, res) => {
   const id = parseInt(req.params.id);
   if (!id) return res.status(400).json({ error: 'ID invalide' });
 
-  const result = db
-    .prepare('DELETE FROM query_history WHERE id = ? AND user_id = ?')
-    .run(id, req.user.id);
+  try {
+    const result = await pool.query(
+      'DELETE FROM query_history WHERE id = $1 AND user_id = $2',
+      [id, req.user.id]
+    );
 
-  if (result.changes === 0) {
-    return res.status(404).json({ error: 'Entrée introuvable' });
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Entrée introuvable' });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('history delete entry error:', e);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
-  res.json({ ok: true });
 });
 
 module.exports = router;
