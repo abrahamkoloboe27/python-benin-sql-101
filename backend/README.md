@@ -84,4 +84,18 @@ Le backend peut être hébergé sur :
 - [Fly.io](https://fly.io)
 - Tout VPS avec Node.js
 
-Pensez à définir `JWT_SECRET` et `FRONTEND_URL` dans les variables d'environnement de la plateforme.
+### Déploiement sur Render
+
+Le fichier `render.yaml` à la racine du dépôt configure automatiquement le service.  
+Après avoir connecté le dépôt dans le dashboard Render, **vous devez définir manuellement `JWT_SECRET`** :
+
+1. Ouvrez votre service dans le dashboard Render.
+2. Accédez à **Environment → Add Environment Variable**.
+3. Ajoutez `JWT_SECRET` avec une valeur longue et aléatoire (ex. : `openssl rand -hex 64`).
+4. Cliquez sur **Save Changes** – un redéploiement se déclenche automatiquement.
+
+> ⚠️  Sans `JWT_SECRET`, le serveur refuse de démarrer (erreur explicite dans les logs).
+
+### Autres plateformes
+
+Définissez au minimum `JWT_SECRET` dans les variables d'environnement de la plateforme.
