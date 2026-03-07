@@ -1,7 +1,7 @@
 # Infrastructure-as-Code pour Render (https://render.com)
 # Ce fichier configure le déploiement automatique du backend sur Render.
 #
-# ⚠️  Avant de déployer, définissez JWT_SECRET dans le dashboard Render :
+# ⚠️  Avant de déployer, définissez les variables d'environnement dans le dashboard Render :
 #     Dashboard → Service → Environment → Add Environment Variable
 
 services:
@@ -12,10 +12,6 @@ services:
     buildCommand: npm ci --omit=dev
     startCommand: node src/index.js
     healthCheckPath: /api/health
-    disk:
-      name: sqlite-data
-      mountPath: /app/data
-      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
@@ -23,3 +19,5 @@ services:
         value: 10000
       - key: JWT_SECRET
         sync: false   # ← à renseigner manuellement dans le dashboard Render
+      - key: DATABASE_URL
+        sync: false   # ← URL de connexion Supabase, à renseigner dans le dashboard Render

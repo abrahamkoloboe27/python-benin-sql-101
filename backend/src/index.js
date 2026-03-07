@@ -9,6 +9,8 @@ if (!process.env.JWT_SECRET) {
   process.exit(1);
 }
 
+const { ready } = require('./db');
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -50,8 +52,10 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Erreur serveur interne' });
 });
 
-// ── Start ─────────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`🚀  Backend SQL 101 — http://localhost:${PORT}`);
-  console.log(`    CORS : toutes les origines autorisées`);
+// ── Start (wait for schema init before accepting connections) ─────────────────
+ready.then(() => {
+  app.listen(PORT, () => {
+    console.log(`🚀  Backend SQL 101 — http://localhost:${PORT}`);
+    console.log(`    CORS : toutes les origines autorisées`);
+  });
 });
