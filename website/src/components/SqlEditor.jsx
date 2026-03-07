@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useAuth } from '../context/AuthContext';
 
 const MAX_ROWS = 200;
 
@@ -8,6 +9,7 @@ export default function SqlEditor({ db, initialQuery = '' }) {
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [rowCount, setRowCount] = useState(0);
+  const { user, saveQuery } = useAuth();
 
   const runQuery = useCallback(() => {
     if (!db || !query.trim()) return;
@@ -19,22 +21,22 @@ export default function SqlEditor({ db, initialQuery = '' }) {
       const res = db.exec(query);
       const total = res.reduce((s, r) => s + r.values.length, 0);
       setRowCount(total);
-      // Trim each result to MAX_ROWS rows
       setResults(res.map((r) => ({ ...r, values: r.values.slice(0, MAX_ROWS) })));
+      // Persist to history if logged in (fire-and-forget)
+      saveQuery(query, total, false);
     } catch (e) {
       setError(e.message);
+      saveQuery(query, 0, true);
     } finally {
       setLoading(false);
     }
-  }, [db, query]);
+  }, [db, query, saveQuery]);
 
   const handleKeyDown = (e) => {
-    // Ctrl+Enter or Cmd+Enter to run query
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       e.preventDefault();
       runQuery();
     }
-    // Tab for indentation
     if (e.key === 'Tab') {
       e.preventDefault();
       const start = e.target.selectionStart;
@@ -77,6 +79,7 @@ export default function SqlEditor({ db, initialQuery = '' }) {
             ✕ Effacer
           </button>
           {!db && <span className="hint">⏳ Chargement de la base…</span>}
+          {user && <span className="hint saved-hint">💾 Requêtes sauvegardées</span>}
           <span className="shortcut-hint">Ctrl+Entrée pour exécuter</span>
         </div>
       </div>
@@ -132,3 +135,4 @@ export default function SqlEditor({ db, initialQuery = '' }) {
     </div>
   );
 }
+

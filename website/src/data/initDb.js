@@ -206,6 +206,16 @@ CREATE TABLE bulletins (
   UNIQUE(eleve_id, annee_scolaire_id, trimestre)
 );
 
+CREATE TABLE enseignements (
+  id INTEGER PRIMARY KEY,
+  enseignant_id INTEGER NOT NULL REFERENCES enseignants(id),
+  classe_id INTEGER NOT NULL REFERENCES classes(id),
+  matiere_id INTEGER NOT NULL REFERENCES matieres(id),
+  heures_hebdo REAL DEFAULT 2.0,
+  created_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(enseignant_id, classe_id, matiere_id)
+);
+
 CREATE VIEW v_moyennes_eleves AS
 SELECT
   e.id AS eleve_id,
@@ -561,26 +571,28 @@ ORDER BY a.libelle, b.classe_id, b.trimestre, b.rang;
   }
 
   // ─── BUILD INSERT STATEMENTS ──────────────────────────────────────────────
-  function inserts(table, rows) {
-    return rows.map(row => `INSERT INTO ${table} VALUES (${row.map(q).join(',')});`).join('\n');
+  // Use explicit column names to avoid mismatch with DEFAULT columns (e.g. created_at).
+  function inserts(table, cols, rows) {
+    const colList = cols.join(', ');
+    return rows.map(row => `INSERT INTO ${table} (${colList}) VALUES (${row.map(q).join(', ')});`).join('\n');
   }
 
   return [
     schema,
-    inserts('pays', pays),
-    inserts('villes', villes),
-    inserts('ecoles', ecoles),
-    inserts('annees_scolaires', annees_scolaires),
-    inserts('niveaux', niveaux),
-    inserts('matieres', matieres),
-    inserts('enseignants', enseignants),
-    inserts('classes', classes),
-    inserts('eleves', eleves),
-    inserts('inscriptions', inscriptions),
-    inserts('evaluations', evaluations),
-    inserts('notes', notes),
-    inserts('absences', absences),
-    inserts('bulletins', bulletins),
-    inserts('enseignements', enseignements),
+    inserts('pays',             ['id','nom','code_iso','continent'], pays),
+    inserts('villes',           ['id','nom','pays_id','code_postal'], villes),
+    inserts('ecoles',           ['id','nom','adresse','ville_id','type_ecole','niveau_ecole','telephone','email','directeur','date_creation','capacite_max'], ecoles),
+    inserts('annees_scolaires', ['id','libelle','date_debut','date_fin','est_active'], annees_scolaires),
+    inserts('niveaux',          ['id','nom','ordre','cycle','description'], niveaux),
+    inserts('matieres',         ['id','nom','code','coefficient','cycle','description'], matieres),
+    inserts('enseignants',      ['id','nom','prenom','email','telephone','genre','date_naissance','date_embauche','specialite','ecole_id'], enseignants),
+    inserts('classes',          ['id','nom','ecole_id','niveau_id','annee_scolaire_id','effectif_max','salle'], classes),
+    inserts('eleves',           ['id','nom','prenom','date_naissance','genre','adresse','ville_id','email_parent','telephone_parent','nom_parent','date_inscription','nationalite'], eleves),
+    inserts('inscriptions',     ['id','eleve_id','classe_id','annee_scolaire_id','date_inscription','statut','motif_sortie'], inscriptions),
+    inserts('evaluations',      ['id','titre','matiere_id','classe_id','annee_scolaire_id','type_evaluation','trimestre','date_debut','date_fin','note_max','coefficient'], evaluations),
+    inserts('notes',            ['id','evaluation_id','eleve_id','note','observation','date_saisie'], notes),
+    inserts('absences',         ['id','eleve_id','classe_id','date_debut','date_fin','motif','justifiee'], absences),
+    inserts('bulletins',        ['id','eleve_id','classe_id','annee_scolaire_id','trimestre','moyenne_generale','rang','appreciation','date_emission'], bulletins),
+    inserts('enseignements',    ['id','enseignant_id','classe_id','matiere_id','heures_hebdo'], enseignements),
   ].join('\n');
 }
