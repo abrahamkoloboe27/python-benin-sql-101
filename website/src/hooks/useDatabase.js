@@ -9,16 +9,14 @@ let initPromise = null;
  * Singleton hook – charge la base SQLite une seule fois et la réutilise.
  */
 export function useDatabase() {
-  const [db, setDb] = useState(dbInstance);
-  const [loading, setLoading] = useState(!dbInstance);
+  // Initialise directement depuis l'instance déjà en mémoire si disponible
+  const [db, setDb] = useState(() => dbInstance);
+  const [loading, setLoading] = useState(() => !dbInstance);
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (dbInstance) {
-      setDb(dbInstance);
-      setLoading(false);
-      return;
-    }
+    // Déjà initialisé : l'état a été rempli par l'initialiseur de useState
+    if (dbInstance) return;
 
     if (!initPromise) {
       initPromise = (async () => {

@@ -1,8 +1,7 @@
-import { createContext, useContext, useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { AuthContext } from './authContext';
 import * as authApi from '../api/auth';
 import * as historyApi from '../api/history';
-
-const AuthContext = createContext(null);
 
 function loadSession() {
   try {
@@ -15,6 +14,15 @@ function loadSession() {
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(loadSession);
+  const [backendOnline, setBackendOnline] = useState(null); // null = inconnu
+
+  /** Vérifie si le backend est joignable (silencieux, sans bloquer le rendu). */
+  useEffect(() => {
+    const BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:3001').replace(/\/$/, '');
+    fetch(`${BASE_URL}/api/health`, { signal: AbortSignal.timeout(4000) })
+      .then((r) => setBackendOnline(r.ok))
+      .catch(() => setBackendOnline(false));
+  }, []);
 
   /** Persist session to localStorage and React state */
   const setSession = useCallback((userData, token) => {
@@ -55,10 +63,9 @@ export function AuthProvider({ children }) {
   }, [user]);
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout, saveQuery }}>
+    <AuthContext.Provider value={{ user, login, register, logout, saveQuery, backendOnline }}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-export const useAuth = () => useContext(AuthContext);

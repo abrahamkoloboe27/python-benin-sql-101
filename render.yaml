@@ -1,0 +1,25 @@
+# Infrastructure-as-Code pour Render (https://render.com)
+# Ce fichier configure le déploiement automatique du backend sur Render.
+#
+# ⚠️  Avant de déployer, définissez JWT_SECRET dans le dashboard Render :
+#     Dashboard → Service → Environment → Add Environment Variable
+
+services:
+  - type: web
+    name: python-benin-sql-101-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm ci --omit=dev
+    startCommand: node src/index.js
+    healthCheckPath: /api/health
+    disk:
+      name: sqlite-data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: JWT_SECRET
+        sync: false   # ← à renseigner manuellement dans le dashboard Render

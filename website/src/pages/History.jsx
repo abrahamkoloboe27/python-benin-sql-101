@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 import * as historyApi from '../api/history';
 
 export default function History() {
-  const { user } = useAuth();
+  const { user, backendOnline } = useAuth();
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -57,6 +57,24 @@ export default function History() {
 
   // ── Not logged in ──────────────────────────────────────────────────────────
   if (!user) {
+    // Backend known to be offline: show informative message
+    if (backendOnline === false) {
+      return (
+        <div className="page history-page">
+          <div className="backend-offline-info">
+            <span className="backend-offline-info-icon">🔌</span>
+            <h2>Backend non disponible</h2>
+            <p>Le serveur backend est inaccessible.</p>
+            <p>
+              Le <strong>playground SQL</strong> fonctionne sans connexion —
+              rendez-vous sur les{' '}
+              <Link to="/exercises">exercices</Link> pour pratiquer.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="page history-page">
         <div className="auth-required">
@@ -156,3 +174,4 @@ export default function History() {
     </div>
   );
 }
+

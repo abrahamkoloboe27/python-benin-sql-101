@@ -39,6 +39,9 @@ jobs:
         working-directory: website
         run: npm run build
 
+      - name: Add 404.html for SPA routing on GitHub Pages
+        run: cp website/dist/index.html website/dist/404.html
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
