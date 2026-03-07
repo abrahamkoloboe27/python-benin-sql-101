@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/useAuth';
 
 export default function AuthModal({ onClose }) {
   const [tab, setTab] = useState('login');
@@ -8,7 +8,7 @@ export default function AuthModal({ onClose }) {
   const [confirm, setConfirm] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login, register } = useAuth();
+  const { login, register, backendOnline } = useAuth();
   const usernameRef = useRef(null);
 
   // Focus username field on open
@@ -67,6 +67,14 @@ export default function AuthModal({ onClose }) {
             {tab === 'login' ? 'Connexion' : 'Créer un compte'}
           </h2>
         </div>
+
+        {/* Backend offline banner */}
+        {backendOnline === false && (
+          <div className="backend-offline-banner" role="alert">
+            ⚠️ Le serveur backend est inaccessible — la connexion et l'historique
+            ne sont pas disponibles. Le playground SQL fonctionne sans connexion.
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="modal-tabs" role="tablist">
@@ -139,7 +147,11 @@ export default function AuthModal({ onClose }) {
             </div>
           )}
 
-          <button type="submit" className="btn-submit" disabled={loading}>
+          <button
+            type="submit"
+            className="btn-submit"
+            disabled={loading || backendOnline === false}
+          >
             {loading
               ? '⏳ Chargement…'
               : tab === 'login'
@@ -149,8 +161,9 @@ export default function AuthModal({ onClose }) {
         </form>
 
         <p className="auth-note">
-          ℹ️ Vos données (compte + historique) sont stockées sur le serveur backend.
-          Assurez-vous que le backend est démarré et configuré.
+          ℹ️ La connexion est <strong>optionnelle</strong> —{' '}
+          le playground SQL fonctionne entièrement dans votre navigateur, sans backend.{' '}
+          Un compte permet uniquement de sauvegarder l'historique des requêtes.
         </p>
       </div>
     </div>

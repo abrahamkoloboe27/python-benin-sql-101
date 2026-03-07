@@ -514,3 +514,19 @@ pre { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
 
 .loading-hint { color: var(--gray-400); font-size: .9rem; padding: 1rem 0; }
 .saved-hint { color: #86efac; }
+
+/* ── Backend offline banner ── */
+.backend-offline-banner {
+  background: #fff7ed; border: 1px solid #fed7aa;
+  border-radius: var(--radius); padding: .65rem .9rem;
+  font-size: .85rem; color: #9a3412; margin-bottom: 1rem;
+  line-height: 1.4;
+}
+
+/* ── Backend offline info (History page) ── */
+.backend-offline-info {
+  text-align: center; padding: 3rem 1rem; color: var(--gray-500);
+}
+.backend-offline-info-icon { font-size: 3rem; display: block; margin-bottom: .75rem; }
+.backend-offline-info h2 { margin-bottom: .5rem; color: var(--gray-700); }
+.backend-offline-info p { font-size: .95rem; margin-bottom: .5rem; }

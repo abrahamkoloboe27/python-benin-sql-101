@@ -20,7 +20,6 @@ function q(val) {
 export function getInitSQL() {
   const rand = seededRand(42);
   const ri = (max) => Math.floor(rand() * max);
-  const rf = (min, max, dec = 2) => parseFloat((rand() * (max - min) + min).toFixed(dec));
   const pick = (arr) => arr[ri(arr.length)];
 
   // ─── TABLES ──────────────────────────────────────────────────────────────
@@ -563,7 +562,6 @@ ORDER BY a.libelle, b.classe_id, b.trimestre, b.rang;
     const mat_id = ev[2];
     const cls_id = ev[3];
     const ens = enseignants[ri(enseignants.length)];
-    const key = `${ens[0]}_${cls_id}_${mat_id}`;
     // Avoid duplicates
     if (!enseignements.find(e => e[1] === ens[0] && e[2] === cls_id && e[3] === mat_id)) {
       enseignements.push([egid++, ens[0], cls_id, mat_id, 2 + ri(3)]);
